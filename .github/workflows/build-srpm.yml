@@ -1,0 +1,102 @@
+name: Build SRPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Dry run"
+        type: boolean
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}
+  queue: single
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - ver: 44
+            container: fedora@sha256:be9d65e2344d805cc11114319c685ecaa96b6d9b4350a0a6460cdb931babbd19
+            chroot: fedora-44-x86_64
+          - ver: 45
+            container: fedora@sha256:82cf57b28207d33f2bfe8ff043325b5bbf28b9aa9853e6469933d977edbd7e7f
+            chroot: fedora-45-x86_64 
+    name: Run (${{ matrix.target.ver }})
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.target.container }}
+    steps:
+      - name: Install git
+        run: dnf install --assumeyes git
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Check latest NVR
+        run: |
+          NVR=$(dnf repoquery kernel --arch=x86_64 --repo=fedora --repo=updates --latest-limit=1 --queryformat="%{name}-%{version}-%{release}" --quiet)
+          echo "::notice::Latest NVR: $NVR"
+          echo "nvr=$NVR" >> $GITHUB_ENV
+          
+          OUTDATED=false
+          if ! grep -q "$NVR" "${{ matrix.target.ver }}.ver"; then
+            OUTDATED=true
+          fi
+          echo "::notice::Outdated: $OUTDATED"
+          echo "outdated=$OUTDATED" >> $GITHUB_ENV
+      - name: Build SRPM
+        if: ${{ env.outdated == 'true' }}
+        run: |
+          dnf install --assumeyes fedpkg
+
+          git clone --branch="f${{ matrix.target.ver }}" https://src.fedoraproject.org/rpms/kernel.git
+          pushd kernel
+          TITLE=$(echo "${{ env.nvr }}" | sed -r 's/\.fc[0-9]{2}//')
+          COMMIT=$(git log --grep="$TITLE" --format="%H")
+          git checkout "$COMMIT"
+
+          cp ../*.patch .
+
+          sed -i 's/^# define buildid \.local$/%define buildid .bsb/' kernel.spec
+          sed -i '/^Patch1: patch-%{patchversion}-redhat\.patch$/ a \
+          Patch10: amd-bsb-dsc-fix.patch\
+          Patch11: bigscreen-beyond-kernel.patch\
+          ' kernel.spec
+          sed -i '/^ApplyOptionalPatch patch-%{patchversion}-redhat\.patch$/ a \
+          ApplyOptionalPatch amd-bsb-dsc-fix.patch\
+          ApplyOptionalPatch bigscreen-beyond-kernel.patch\
+          ' kernel.spec
+
+          fedpkg --release=f${{ matrix.target.ver }} srpm
+
+          popd
+
+      - name: Trigger COPR build
+        if: ${{ env.outdated == 'true' && !inputs.dryRun }}
+        run: |
+          dnf install --assumeyes copr-cli
+
+          mkdir -p ~/.config
+          cat >~/.config/copr <<EOF
+          [copr-cli]
+          login = ${{ secrets.COPR_LOGIN }}
+          username = ${{ vars.COPR_USERNAME }}
+          token = ${{ secrets.COPR_TOKEN }}
+          copr_url = https://copr.fedorainfracloud.org
+          EOF
+
+          copr-cli build --chroot="${{ matrix.target.chroot }}" --nowait kernel-bsb ./kernel/*.src.rpm
+
+          echo "${{ env.nvr }}" > "${{ matrix.target.ver }}.ver"
+
+          git config --global user.name github-actions
+          git config --global user.email github-actions@github.com
+          git config --global --add safe.directory $(pwd)
+
+          git add "${{ matrix.target.ver }}.ver"
+          git commit -m "${{ env.nvr }}"
+          git push
