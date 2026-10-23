@@ -24,9 +24,17 @@ jobs:
           - ver: 44
             container: fedora@sha256:be9d65e2344d805cc11114319c685ecaa96b6d9b4350a0a6460cdb931babbd19
             chroot: fedora-44-x86_64
+            patches:
+              - amd-bsb-dsc-fix.7.2.patch
+              - bigscreen-beyond-kernel.7.1.patch
+
           - ver: 45
             container: fedora@sha256:82cf57b28207d33f2bfe8ff043325b5bbf28b9aa9853e6469933d977edbd7e7f
             chroot: fedora-45-x86_64 
+            patches:
+              - amd-bsb-dsc-fix.7.2.patch
+              - bigscreen-beyond-kernel.7.1.patch
+
     name: Run (${{ matrix.target.ver }})
     runs-on: ubuntu-latest
     container:
@@ -36,18 +44,21 @@ jobs:
         run: dnf install --assumeyes git
       - name: Checkout repository
         uses: actions/checkout@v7
+
       - name: Check latest NVR
         run: |
           NVR=$(dnf repoquery kernel --arch=x86_64 --repo=fedora --repo=updates --latest-limit=1 --queryformat="%{name}-%{version}-%{release}" --quiet)
-          echo "::notice::Latest NVR: $NVR"
           echo "nvr=$NVR" >> $GITHUB_ENV
           
           OUTDATED=false
           if ! grep -q "$NVR" "${{ matrix.target.ver }}.ver"; then
             OUTDATED=true
           fi
-          echo "::notice::Outdated: $OUTDATED"
           echo "outdated=$OUTDATED" >> $GITHUB_ENV
+
+          echo "::notice::Latest NVR: $NVR
+          Outdated: $OUTDATED"
+
       - name: Build SRPM
         if: ${{ env.outdated == 'true' }}
         run: |
@@ -59,17 +70,12 @@ jobs:
           COMMIT=$(git log --grep="$TITLE" --format="%H")
           git checkout "$COMMIT"
 
-          cp ../*.patch .
-
           sed -i 's/^# define buildid \.local$/%define buildid .bsb/' kernel.spec
-          sed -i '/^Patch1: patch-%{patchversion}-redhat\.patch$/ a \
-          Patch10: amd-bsb-dsc-fix.patch\
-          Patch11: bigscreen-beyond-kernel.patch\
-          ' kernel.spec
-          sed -i '/^ApplyOptionalPatch patch-%{patchversion}-redhat\.patch$/ a \
-          ApplyOptionalPatch amd-bsb-dsc-fix.patch\
-          ApplyOptionalPatch bigscreen-beyond-kernel.patch\
-          ' kernel.spec
+
+          patches="${{ join(matrix.target.patches, ' ') }}"
+          for patch in $patches; do
+            cat "../patches/$patch" >> ./linux-kernel-test.patch
+          done
 
           fedpkg --release=f${{ matrix.target.ver }} srpm
 
