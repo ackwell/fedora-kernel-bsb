@@ -99,10 +99,45 @@ jobs:
 
           echo "${{ env.nvr }}" > "${{ matrix.target.ver }}.ver"
 
+      # Workaround to exfiltrate info from matrix
+      - name: Upload version artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: version-${{ matrix.target.ver }}
+          path: ${{ matrix.target.ver }}.ver
+          retention-days: 1
+
+  commit-versions:
+    name: "Commit updated version strings"
+    runs-on: ubuntu-latest
+    needs: [run]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Download version artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: version-*
+          merge-multiple: true
+
+      - name: Check for changes
+        run: |
+          git update-index --refresh
+
+          DIRTY=false
+          if ! git diff-index --quiet HEAD --; then
+            DIRTY=true
+            echo "::notice::Version changes detected"
+          fi
+          echo "dirty=$DIRTY" >> $GITHUB_ENV
+
+      - name: Commit updated versions
+        if: ${{ env.dirty == 'true' && !inputs.dryRun }}
+        run: |
           git config --global user.name github-actions
           git config --global user.email github-actions@github.com
           git config --global --add safe.directory $(pwd)
 
-          git add "${{ matrix.target.ver }}.ver"
-          git commit -m "${{ env.nvr }}"
+          git add *.ver
+          git commit -m "Package updates $(date +%s)"
           git push
