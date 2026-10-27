@@ -56,8 +56,7 @@ jobs:
           fi
           echo "outdated=$OUTDATED" >> $GITHUB_ENV
 
-          echo "::notice::Latest NVR: $NVR
-          Outdated: $OUTDATED"
+          echo "::notice::Latest NVR: $NVR, outdated: $OUTDATED"
 
       - name: Build SRPM
         if: ${{ env.outdated == 'true' }}
@@ -97,6 +96,9 @@ jobs:
 
           copr-cli build --chroot="${{ matrix.target.chroot }}" --nowait kernel-bsb ./kernel/*.src.rpm
 
+      - name: Update version files
+        if: ${{ env.outdated == 'true' }}
+        run: |
           echo "${{ env.nvr }}" > "${{ matrix.target.ver }}.ver"
 
       # Workaround to exfiltrate info from matrix
@@ -127,9 +129,9 @@ jobs:
           DIRTY=false
           if ! git diff-index --quiet HEAD --; then
             DIRTY=true
-            echo "::notice::Version changes detected"
           fi
           echo "dirty=$DIRTY" >> $GITHUB_ENV
+          echo "::notice::Versions changed: $DIRTY"
 
       - name: Commit updated versions
         if: ${{ env.dirty == 'true' && !inputs.dryRun }}
