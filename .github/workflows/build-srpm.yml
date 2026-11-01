@@ -127,7 +127,7 @@ jobs:
 
       - name: Check for changes
         run: |
-          git update-index --refresh -q
+          git update-index --refresh -q || true
           DIRTY=false
           if ! git diff-files --quiet; then
             DIRTY=true
