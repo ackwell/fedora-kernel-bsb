@@ -72,7 +72,11 @@ jobs:
           COMMIT=$(git log --grep="$TITLE" --format="%H")
           git checkout "$COMMIT"
 
+          # Set the build ID
           sed -i 's/^# define buildid \.local$/%define buildid .bsb/' kernel.spec
+
+          # Fedora builds disable headers, as they're a seperate package. Remove - I really don't wanna orchestrate around that.
+          sed -i '/^# Kernel headers are being split out into a separate package$/{N;N;d;}' kernel.spec
 
           patches="${{ join(matrix.target.patches, ' ') }}"
           for patch in $patches; do
