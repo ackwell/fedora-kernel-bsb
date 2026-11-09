@@ -7,6 +7,10 @@ on:
         description: "Dry run"
         type: boolean
         required: false
+      bypassVersionCheck:
+        description: "Bypass version check"
+        type: boolean
+        required: false
   schedule:
     - cron: "20 4 * * *"
       timezone: "Australia/Melbourne"
@@ -49,6 +53,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Check latest NVR
+        if: ${{ !inputs.bypassVersionCheck }}
         run: |
           NVR=$(dnf repoquery kernel --arch=x86_64 --repo=fedora --repo=updates --latest-limit=1 --queryformat="%{name}-%{version}-%{release}" --quiet)
           echo "nvr=$NVR" >> $GITHUB_ENV
@@ -62,7 +67,7 @@ jobs:
           echo "::notice::Latest NVR: $NVR, outdated: $OUTDATED"
 
       - name: Build SRPM
-        if: ${{ env.outdated == 'true' }}
+        if: ${{ inputs.bypassVersionCheck || env.outdated == 'true' }}
         run: |
           dnf install --assumeyes fedpkg
 
@@ -88,7 +93,7 @@ jobs:
           popd
 
       - name: Trigger COPR build
-        if: ${{ env.outdated == 'true' && !inputs.dryRun }}
+        if: ${{ (inputs.bypassVersionCheck || env.outdated == 'true') && !inputs.dryRun }}
         run: |
           dnf install --assumeyes copr-cli
 
@@ -104,7 +109,7 @@ jobs:
           copr-cli build --chroot="${{ matrix.target.chroot }}" --nowait kernel-bsb ./kernel/*.src.rpm
 
       - name: Update version files
-        if: ${{ env.outdated == 'true' }}
+        if: ${{ inputs.bypassVersionCheck || env.outdated == 'true' }}
         run: |
           echo "${{ env.nvr }}" > "${{ matrix.target.ver }}.ver"
 
