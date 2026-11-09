@@ -53,7 +53,6 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Check latest NVR
-        if: ${{ !inputs.bypassVersionCheck }}
         run: |
           NVR=$(dnf repoquery kernel --arch=x86_64 --repo=fedora --repo=updates --latest-limit=1 --queryformat="%{name}-%{version}-%{release}" --quiet)
           echo "nvr=$NVR" >> $GITHUB_ENV
